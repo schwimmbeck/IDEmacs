@@ -166,6 +166,8 @@
   :commands (lsp lsp-deferred)
   :init
   (setq lsp-keymap-prefix "C-c l")
+  :config
+  (add-to-list 'lsp-language-id-configuration '(ord-mode . "python"))
   :custom
   (lsp-enable-snippet nil)
   (lsp-log-io nil)
