@@ -166,8 +166,6 @@
   :commands (lsp lsp-deferred)
   :init
   (setq lsp-keymap-prefix "C-c l")
-  :config
-  (add-to-list 'lsp-language-id-configuration '(ord-mode . "python"))
   :custom
   (lsp-enable-snippet nil)
   (lsp-log-io nil)
@@ -176,10 +174,36 @@
   (lsp-headerline-breadcrumb-enable t)
   (lsp-idle-delay 0.2)
   (lsp-pylsp-plugins-pycodestyle-enabled nil)
-  :hook ((python-mode . lsp-deferred)))
+  :hook ((python-mode . lsp-deferred)
+         (ord-mode . lsp-deferred)))
 
 (use-package lsp-pyright
   :after lsp-mode
+  :config
+  (add-to-list 'lsp-language-id-configuration '(ord-mode . "python"))
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection
+                     (lambda ()
+                       (cons (lsp-package-path 'pyright)
+                             lsp-pyright-langserver-command-args)))
+    :major-modes '(ord-mode)
+    :server-id 'pyright-ord
+    :multi-root lsp-pyright-multi-root
+    :priority 2
+    :initialized-fn (lambda (workspace)
+                      (with-lsp-workspace workspace
+                        (lsp--set-configuration
+                         (make-hash-table :test 'equal))))
+    :download-server-fn (lambda (_client callback error-callback _update?)
+                          (lsp-package-ensure 'pyright callback error-callback))
+    :notification-handlers
+    (lsp-ht ((concat lsp-pyright-langserver-command "/beginProgress")
+             'lsp-pyright--begin-progress-callback)
+            ((concat lsp-pyright-langserver-command "/reportProgress")
+             'lsp-pyright--report-progress-callback)
+            ((concat lsp-pyright-langserver-command "/endProgress")
+             'lsp-pyright--end-progress-callback))))
   :custom
   (lsp-pyright-typechecking-mode "off")
   (lsp-pyright-diagnostic-mode "openFilesOnly")
@@ -237,12 +261,15 @@
   ;; diagnostics in dynamic codebases. Let Flycheck handle lightweight syntax
   ;; validation instead.
   (setq-local lsp-diagnostics-provider :none)
+  (setq-local lsp-disabled-clients
+              '(semgrep-ls ruff-lsp pylsp pyls))
   (setq-local flycheck-checker 'python-pycompile)
   (setq-local flycheck-disabled-checkers
               '(python-pylint python-flake8 python-mypy))
   (my/python-auto-venv))
 
 (add-hook 'python-mode-hook #'my/python-mode-setup)
+(add-hook 'ord-mode-hook #'my/python-mode-setup)
 
 (defun my/run-project-tests ()
   "Run pytest for the current project."
@@ -265,13 +292,19 @@
  ;; custom-set-variables was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ '(ignored-local-variable-values '((version . ord1)))
  '(package-selected-packages
-   '(ace-window blacken cape consult corfu flycheck lsp-pyright marginalia
-                multiple-cursors orderless treemacs-projectile vertico))
+   '(ace-window blacken cape consult corfu flycheck lsp-pyright
+				marginalia multiple-cursors orderless
+				treemacs-projectile vertico))
  '(safe-local-variable-values '((version . ord2) (version . ord))))
 
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
  )
 
 (provide 'init)
