@@ -1,29 +1,35 @@
-;;; init.el --- PyCharm-like Emacs setup for Python and ORDeC -*- lexical-binding: t; -*-
+;;; init.el --- PyCharm-like Emacs setup -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;; Emacs configuration tuned for an IDE workflow:
 ;; - project-centric editing
 ;; - tree/file navigation
 ;; - completion, diagnostics, formatting, and LSP
-;; - ORDeC as the default project on startup
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'package)
 (require 'subr-x)
+(require 'treesit nil t)
 
-(defconst my/default-project
-  (expand-file-name "~/Work/workspace/ordec/")
-  "Project opened by default when Emacs starts without files.")
+(defcustom my/ord-treesit-dir
+  (let ((default-dir (expand-file-name "~/Work/workspace/syntax_highlighting_ordec/tree-sitter-ord/")))
+    (when (file-directory-p default-dir)
+      default-dir))
+  "Optional path to a tree-sitter grammar directory for `.ord' files."
+  :type '(choice (const :tag "Disabled" nil) directory)
+  :group 'tools)
 
-(defconst my/ordec-treesit-dir
-  (expand-file-name "syntax_highlighting/tree-sitter-ord/" my/default-project)
-  "Expected location of the ORDeC tree-sitter grammar.")
+(defun my/ord-highlights-file ()
+  "Return the highlight query file for the optional ORD tree-sitter grammar."
+  (when my/ord-treesit-dir
+    (expand-file-name "queries/highlights.scm" my/ord-treesit-dir)))
 
-(defconst my/ordec-highlights-file
-  (expand-file-name "queries/highlights.scm" my/ordec-treesit-dir)
-  "Expected location of the ORDeC tree-sitter highlight query.")
+(defun my/ord-emacs-highlights-file ()
+  "Return the Emacs-specific highlight query file for the optional ORD grammar."
+  (when my/ord-treesit-dir
+    (expand-file-name "queries/highlights-emacs.scm" my/ord-treesit-dir)))
 
 ;; Keep tabs literal by default.
 (setq-default indent-tabs-mode t)
@@ -73,6 +79,7 @@
 (save-place-mode 1)
 (recentf-mode 1)
 (desktop-save-mode 1)
+(load-theme 'modus-vivendi t)
 
 (setq desktop-restore-eager 10
       recentf-max-saved-items 200
@@ -149,8 +156,6 @@
         projectile-project-search-path '("~/Work/workspace/")
         projectile-globally-ignored-directories
         '(".idea" ".git" ".venv" "__pycache__" ".pytest_cache" "htmlcov" "node_modules" "dist" "build"))
-  (when (file-directory-p my/default-project)
-    (projectile-add-known-project my/default-project))
   :bind-keymap ("C-c p" . projectile-command-map))
 
 (use-package treemacs
@@ -185,8 +190,11 @@
 (use-package lsp-pyright
   :after lsp-mode
   :custom
-  (lsp-pyright-typechecking-mode "basic")
-  (lsp-pyright-use-library-code-for-types t))
+  (lsp-pyright-typechecking-mode "off")
+  (lsp-pyright-diagnostic-mode "openFilesOnly")
+  (lsp-pyright-disable-tagged-hints t)
+  (lsp-pyright-use-library-code-for-types t)
+  (lsp-pyright-auto-search-paths t))
 
 (use-package flycheck
   :init
@@ -211,13 +219,27 @@
   (let* ((root (my/project-root))
          (python (expand-file-name ".venv/bin/python" root)))
     (when (file-exists-p python)
-      (setq-local lsp-pyright-python-executable-cmd python))))
+      (setq-local lsp-pyright-python-executable-cmd python))
+    (setq-local lsp-pyright-extra-paths
+                (vconcat
+                 (seq-filter
+                  #'file-directory-p
+                  (list root
+                        (expand-file-name "ordec" root)
+                        (expand-file-name "tests" root)))))))
 
 (defun my/python-mode-setup ()
   "Apply IDE-style defaults for Python buffers."
   (setq-local fill-column 88)
   (setq-local tab-width 4)
   (setq-local python-indent-offset 4)
+  ;; Keep LSP for completion and navigation, but avoid Pyright's noisy project
+  ;; diagnostics in dynamic codebases. Let Flycheck handle lightweight syntax
+  ;; validation instead.
+  (setq-local lsp-diagnostics-provider :none)
+  (setq-local flycheck-checker 'python-pycompile)
+  (setq-local flycheck-disabled-checkers
+              '(python-pylint python-flake8 python-mypy))
   (my/python-auto-venv))
 
 (add-hook 'python-mode-hook #'my/python-mode-setup)
@@ -232,52 +254,66 @@
 (global-set-key (kbd "S-<f5>") #'recompile)
 
 ;; ---------------------------------------------------------------------------
-;; ORDeC support
+;; ORD support
 ;; ---------------------------------------------------------------------------
 (defvar ord--treesit-font-lock-settings nil
   "Compiled tree-sitter font-lock settings for `ord-mode'.")
 
-(when (boundp 'treesit-extra-load-path)
-  (add-to-list 'treesit-extra-load-path my/ordec-treesit-dir))
+(defconst my/ord-extra-font-lock-keywords
+  '(("^\\s-*\\(cell\\)\\s-+\\([[:alpha:]_][[:alnum:]_]*\\)"
+     (1 font-lock-keyword-face)
+     (2 font-lock-type-face))
+    ("^\\s-*\\(viewgen\\)\\s-+\\([[:alpha:]_][[:alnum:]_]*\\)\\(?:.*?->\\s-*\\([[:alpha:]_][[:alnum:]_]*\\)\\)?"
+     (1 font-lock-keyword-face)
+     (2 font-lock-function-name-face)
+     (3 font-lock-type-face nil t))
+    ("^\\s-*\\(path\\|net\\)\\b" 1 font-lock-keyword-face)
+    ("^\\s-*\\(inout\\|input\\|output\\|port\\)\\b" 1 font-lock-keyword-face)
+    ("\\(\\.\\)\\(\\$\\)\\([[:alpha:]_][[:alnum:]_]*\\)"
+     (1 font-lock-keyword-face)
+     (2 font-lock-keyword-face)
+     (3 font-lock-variable-name-face))
+    ("\\(--\\|!(?!=)\\)" 1 font-lock-keyword-face)
+    ("\\_<\\([0-9][0-9_]*\\)\\([afpnumkMGT]\\)\\_>"
+     (1 font-lock-constant-face)
+     (2 font-lock-type-face))
+    ("\\_<\\([0-9][0-9_]*\\)\\s-*\\(/\\)\\s-*\\([0-9][0-9_]*\\)\\_>"
+     (1 font-lock-constant-face)
+     (2 font-lock-keyword-face)
+     (3 font-lock-constant-face)))
+  "Supplemental regex-based font-lock rules for ORD constructs not covered well by the parser.")
 
-(when (and (file-exists-p my/ordec-highlights-file)
-           (fboundp 'treesit-query-compile))
+(when (and my/ord-treesit-dir
+           (boundp 'treesit-extra-load-path))
+  (add-to-list 'treesit-extra-load-path my/ord-treesit-dir))
+
+(when (and (my/ord-emacs-highlights-file)
+           (file-exists-p (my/ord-emacs-highlights-file))
+           (fboundp 'treesit-font-lock-rules))
   (setq ord--treesit-font-lock-settings
-        (treesit-query-compile
-         'ord
+        (treesit-font-lock-rules
+         :language 'ord
+         :feature 'ord
          (with-temp-buffer
-           (insert-file-contents my/ordec-highlights-file)
+           (insert-file-contents (my/ord-emacs-highlights-file))
            (buffer-string)))))
 
 (define-derived-mode ord-mode prog-mode "Ord"
-  "Major mode for editing ORDeC .ord files."
+  "Major mode for editing `.ord' files."
   (setq-local comment-start "# ")
   (setq-local comment-end "")
   (setq-local tab-width 4)
   (setq-local indent-tabs-mode t)
+  (font-lock-add-keywords nil my/ord-extra-font-lock-keywords 'append)
   (when (and (fboundp 'treesit-language-available-p)
              (treesit-language-available-p 'ord)
              ord--treesit-font-lock-settings)
     (treesit-parser-create 'ord)
     (setq-local treesit-font-lock-settings ord--treesit-font-lock-settings)
+    (setq-local treesit-font-lock-feature-list '((ord)))
     (treesit-major-mode-setup)))
 
 (add-to-list 'auto-mode-alist '("\\.ord\\'" . ord-mode))
-
-;; ---------------------------------------------------------------------------
-;; Default startup project
-;; ---------------------------------------------------------------------------
-(defun my/startup-open-default-project ()
-  "Open the default project on startup when Emacs has no file arguments."
-  (when (and (not noninteractive)
-             (file-directory-p my/default-project)
-             (null command-line-args-left)
-             (not (cl-some #'buffer-file-name (buffer-list))))
-    (projectile-switch-project-by-name my/default-project)
-    (when (fboundp 'treemacs-add-and-display-current-project-exclusively)
-      (treemacs-add-and-display-current-project-exclusively))))
-
-(add-hook 'emacs-startup-hook #'my/startup-open-default-project)
 
 (custom-set-variables
  ;; custom-set-variables was added by Custom.
