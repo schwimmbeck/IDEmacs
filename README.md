@@ -1,73 +1,145 @@
 # IDEmacs
 
-Emacs configuration repository for a project-oriented IDE workflow.
+Emacs configuration for a project-oriented IDE workflow, with first-class
+support for Python and local support for the ORD language used by ORDeC.
 
-This repo is the source of truth for the active Emacs configuration on this
-machine. `~/.emacs.d/init.el` is a symlink to this repository's `init.el`.
+This repository is intended to be usable by external users, but it currently
+assumes a local development workflow where custom ORD language support is
+developed side-by-side in a separate repository:
 
-## Goals
+- `syntax_highlighting_ordec`
 
-- Keep Emacs usable as a daily IDE for Python-heavy work
-- Prefer stable, well-supported packages
-- Preserve fast navigation, completion, diagnostics, and project handling
-- Support `.ord` files through the separate `syntax_highlighting_ordec` repo
+## What This Repository Provides
 
-## Active Setup
+- a modern Emacs setup with completion, search, project navigation, and LSP
+- Python support based on `lsp-mode`, `lsp-pyright`, `flycheck`, and `blacken`
+- local `.ord` support using a custom tree-sitter grammar
+- an Emacs configuration that can act as the source of truth for `~/.emacs.d`
 
-- Theme: `modus-vivendi`
+## Main Components
+
 - Completion: `vertico`, `orderless`, `marginalia`, `consult`, `corfu`, `cape`
-- Projects: `projectile`, `treemacs`
-- Python IDE features: `lsp-mode`, `lsp-pyright`, `flycheck`, `blacken`
-- ORD support: custom `ord-mode` using a local tree-sitter grammar
+- Projects and sidebar: `projectile`, `treemacs`
+- Python editing: built-in Python mode / `python-ts-mode`, `lsp-mode`,
+  `lsp-pyright`, `flycheck`, `blacken`
+- Theme: `modus-vivendi`
+- ORD editing: local `ord-mode` built on tree-sitter
 
 ## Repository Layout
 
 - [init.el](/home/dominik/Work/workspace/IDEmacs/init.el): main Emacs config
 
-## ORD Integration
+## Setup
 
-ORD support is wired from the local shared grammar repository:
-
-- [syntax_highlighting_ordec](/home/dominik/Work/workspace/syntax_highlighting_ordec)
-- [tree-sitter-ord](/home/dominik/Work/workspace/syntax_highlighting_ordec/tree-sitter-ord)
-
-The current setup in `init.el`:
-
-- associates `.ord` files with `ord-mode`
-- loads the local tree-sitter parser for `ord`
-- applies Emacs-specific tree-sitter highlight queries
-
-## Local Machine Notes
-
-The active local file is:
-
-- [init.el](/home/dominik/.emacs.d/init.el)
-
-It should remain a symlink to:
-
-- [init.el](/home/dominik/Work/workspace/IDEmacs/init.el)
-
-## Working Model
-
-When changing Emacs behavior:
-
-1. Edit this repository first.
-2. Keep `~/.emacs.d/init.el` as a symlink.
-3. Reload Emacs or restart it to test changes.
-
-## Validation
-
-Typical validation commands:
+### 1. Clone The Repository
 
 ```bash
-emacs --batch -Q -l /home/dominik/Work/workspace/IDEmacs/init.el
+git clone <your-remote-url> IDEmacs
+cd IDEmacs
 ```
 
-For ORD parser work:
+### 2. Use It As Your Emacs Init
+
+If you want this repository to be your live Emacs config, replace your local
+`init.el` with a symlink:
 
 ```bash
-cd /home/dominik/Work/workspace/syntax_highlighting_ordec/tree-sitter-ord
+mv ~/.emacs.d/init.el ~/.emacs.d/init.el.backup
+ln -s /absolute/path/to/IDEmacs/init.el ~/.emacs.d/init.el
+```
+
+If you do not want to use a symlink, you can copy the file instead:
+
+```bash
+cp /absolute/path/to/IDEmacs/init.el ~/.emacs.d/init.el
+```
+
+### 3. Start Emacs
+
+The first launch may install missing packages from GNU ELPA / MELPA Stable.
+
+## ORD Setup
+
+ORD support is not built into Emacs. This config expects a sibling checkout of
+the language-support repository:
+
+- [syntax_highlighting_ordec](/home/dominik/Work/workspace/syntax_highlighting_ordec)
+
+The current `init.el` looks for:
+
+- `tree-sitter-ord`
+- `vendor/tree-sitter-python`
+
+inside that repository.
+
+### Required Local Layout
+
+Example:
+
+```text
+~/Work/workspace/
+  IDEmacs/
+  syntax_highlighting_ordec/
+    tree-sitter-ord/
+    vendor/
+      tree-sitter-python/
+```
+
+### Building The Grammars
+
+ORD:
+
+```bash
+cd /path/to/syntax_highlighting_ordec/tree-sitter-ord
 tree-sitter generate
 cc -fPIC -I./src -c src/parser.c src/scanner.c
 cc -shared -o libtree-sitter-ord.so parser.o scanner.o
 ```
+
+Python:
+
+```bash
+cd /path/to/syntax_highlighting_ordec/vendor/tree-sitter-python
+tree-sitter generate
+cc -fPIC -I./src -c src/parser.c src/scanner.c
+cc -shared -o libtree-sitter-python.so parser.o scanner.o
+```
+
+After that, restart Emacs or reload the init file.
+
+## How The ORD Integration Works
+
+The current setup uses:
+
+- `python-ts-mode` as the base mode for Python-like behavior
+- the local Python tree-sitter grammar for Python highlighting
+- the local ORD tree-sitter grammar for ORD-specific syntax
+- Emacs-specific queries from `syntax_highlighting_ordec/tree-sitter-ord`
+
+This approach keeps Python highlighting and editor behavior close to the
+built-in Emacs experience while layering ORD-specific syntax on top.
+
+## Validation
+
+Check that the init file loads:
+
+```bash
+emacs --batch -Q -l /absolute/path/to/IDEmacs/init.el
+```
+
+Check that Emacs can see both grammars:
+
+```bash
+emacs --batch -Q -l /absolute/path/to/IDEmacs/init.el \
+  --eval '(princ (format "python=%S ord=%S\n"
+                         (treesit-language-available-p (quote python))
+                         (treesit-language-available-p (quote ord))))'
+```
+
+## Notes For External Users
+
+- The config is optimized for local development, not for MELPA packaging.
+- The ORD integration currently assumes local paths rather than a published
+  Emacs package.
+- If you want a portable/public setup, the next step would be to package the
+  ORD Emacs support as its own minor project and keep `init.el` thinner.

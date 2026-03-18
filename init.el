@@ -10,8 +10,17 @@
 
 (require 'cl-lib)
 (require 'package)
+(require 'python)
 (require 'subr-x)
 (require 'treesit nil t)
+
+(defcustom my/python-treesit-dir
+  (let ((default-dir (expand-file-name "~/Work/workspace/syntax_highlighting_ordec/vendor/tree-sitter-python/")))
+    (when (file-directory-p default-dir)
+      default-dir))
+  "Optional path to a local tree-sitter Python grammar directory."
+  :type '(choice (const :tag "Disabled" nil) directory)
+  :group 'tools)
 
 (defcustom my/ord-treesit-dir
   (let ((default-dir (expand-file-name "~/Work/workspace/syntax_highlighting_ordec/tree-sitter-ord/")))
@@ -20,11 +29,6 @@
   "Optional path to a tree-sitter grammar directory for `.ord' files."
   :type '(choice (const :tag "Disabled" nil) directory)
   :group 'tools)
-
-(defun my/ord-highlights-file ()
-  "Return the highlight query file for the optional ORD tree-sitter grammar."
-  (when my/ord-treesit-dir
-    (expand-file-name "queries/highlights.scm" my/ord-treesit-dir)))
 
 (defun my/ord-emacs-highlights-file ()
   "Return the Emacs-specific highlight query file for the optional ORD grammar."
@@ -64,7 +68,8 @@
       use-dialog-box nil
       frame-title-format '("%b - Emacs IDE")
       compilation-scroll-output t
-      read-process-output-max (* 1024 1024))
+      read-process-output-max (* 1024 1024)
+      python-indent-guess-indent-offset nil)
 
 (menu-bar-mode 1)
 (tool-bar-mode -1)
@@ -156,6 +161,8 @@
         projectile-project-search-path '("~/Work/workspace/")
         projectile-globally-ignored-directories
         '(".idea" ".git" ".venv" "__pycache__" ".pytest_cache" "htmlcov" "node_modules" "dist" "build"))
+  (setq projectile-known-projects
+        (seq-filter #'file-directory-p projectile-known-projects))
   :bind-keymap ("C-c p" . projectile-command-map))
 
 (use-package treemacs
@@ -179,6 +186,7 @@
   :init
   (setq lsp-keymap-prefix "C-c l")
   :custom
+  (lsp-enable-snippet nil)
   (lsp-log-io nil)
   (lsp-completion-provider :none)
   (lsp-enable-symbol-highlighting t)
@@ -217,16 +225,25 @@
 (defun my/python-auto-venv ()
   "Use the current project's .venv for Pyright when available."
   (let* ((root (my/project-root))
-         (python (expand-file-name ".venv/bin/python" root)))
+         (python (expand-file-name ".venv/bin/python" root))
+         (project-subdirs
+          (seq-filter
+           #'file-directory-p
+           (mapcar
+            (lambda (name) (expand-file-name name root))
+            '("src" "tests"))))
+         (python-package-dirs
+          (seq-filter
+           #'file-directory-p
+           (directory-files root t "^[[:alpha:]_][[:alnum:]_]*$"))))
     (when (file-exists-p python)
       (setq-local lsp-pyright-python-executable-cmd python))
     (setq-local lsp-pyright-extra-paths
                 (vconcat
-                 (seq-filter
-                  #'file-directory-p
-                  (list root
-                        (expand-file-name "ordec" root)
-                        (expand-file-name "tests" root)))))))
+                 (delete-dups
+                  (append (list root)
+                          project-subdirs
+                          python-package-dirs))))))
 
 (defun my/python-mode-setup ()
   "Apply IDE-style defaults for Python buffers."
@@ -268,49 +285,51 @@
      (2 font-lock-function-name-face)
      (3 font-lock-type-face nil t))
     ("^\\s-*\\(path\\|net\\)\\b" 1 font-lock-keyword-face)
-    ("^\\s-*\\(inout\\|input\\|output\\|port\\)\\b" 1 font-lock-keyword-face)
-    ("\\(\\.\\)\\(\\$\\)\\([[:alpha:]_][[:alnum:]_]*\\)"
-     (1 font-lock-keyword-face)
-     (2 font-lock-keyword-face)
-     (3 font-lock-variable-name-face))
-    ("\\(--\\|!(?!=)\\)" 1 font-lock-keyword-face)
-    ("\\_<\\([0-9][0-9_]*\\)\\([afpnumkMGT]\\)\\_>"
-     (1 font-lock-constant-face)
-     (2 font-lock-type-face))
-    ("\\_<\\([0-9][0-9_]*\\)\\s-*\\(/\\)\\s-*\\([0-9][0-9_]*\\)\\_>"
-     (1 font-lock-constant-face)
-     (2 font-lock-keyword-face)
-     (3 font-lock-constant-face)))
-  "Supplemental regex-based font-lock rules for ORD constructs not covered well by the parser.")
+    ("^\\s-*\\(inout\\|input\\|output\\|port\\)\\b" 1 font-lock-keyword-face))
+  "Small regex supplement for ORD declaration keywords on top of Python tree-sitter highlighting.")
 
-(when (and my/ord-treesit-dir
-           (boundp 'treesit-extra-load-path))
-  (add-to-list 'treesit-extra-load-path my/ord-treesit-dir))
+(defconst my/ord-python-treesit-feature-list
+  '((comment definition)
+    (keyword string type)
+    (assignment builtin constant decorator
+                escape-sequence number string-interpolation)
+    (bracket delimiter function operator variable property)
+    (ord))
+  "Python tree-sitter features plus the ORD-specific feature group.")
+
+(when (boundp 'treesit-extra-load-path)
+  (dolist (dir (list my/python-treesit-dir my/ord-treesit-dir))
+    (when dir
+      (add-to-list 'treesit-extra-load-path dir))))
 
 (when (and (my/ord-emacs-highlights-file)
            (file-exists-p (my/ord-emacs-highlights-file))
            (fboundp 'treesit-font-lock-rules))
   (setq ord--treesit-font-lock-settings
-        (treesit-font-lock-rules
-         :language 'ord
-         :feature 'ord
-         (with-temp-buffer
-           (insert-file-contents (my/ord-emacs-highlights-file))
-           (buffer-string)))))
+        (append
+         python--treesit-settings
+         (treesit-font-lock-rules
+          :language 'ord
+          :feature 'ord
+          (with-temp-buffer
+            (insert-file-contents (my/ord-emacs-highlights-file))
+            (buffer-string))))))
 
-(define-derived-mode ord-mode prog-mode "Ord"
+(define-derived-mode ord-mode python-ts-mode "Ord"
   "Major mode for editing `.ord' files."
   (setq-local comment-start "# ")
   (setq-local comment-end "")
   (setq-local tab-width 4)
   (setq-local indent-tabs-mode t)
-  (font-lock-add-keywords nil my/ord-extra-font-lock-keywords 'append)
+  (font-lock-add-keywords nil my/ord-extra-font-lock-keywords 'prepend)
   (when (and (fboundp 'treesit-language-available-p)
+             (treesit-language-available-p 'python)
              (treesit-language-available-p 'ord)
              ord--treesit-font-lock-settings)
+    (treesit-parser-create 'python)
     (treesit-parser-create 'ord)
     (setq-local treesit-font-lock-settings ord--treesit-font-lock-settings)
-    (setq-local treesit-font-lock-feature-list '((ord)))
+    (setq-local treesit-font-lock-feature-list my/ord-python-treesit-feature-list)
     (treesit-major-mode-setup)))
 
 (add-to-list 'auto-mode-alist '("\\.ord\\'" . ord-mode))
