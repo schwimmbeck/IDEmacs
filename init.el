@@ -125,6 +125,11 @@
 (use-package ace-window
   :bind (("M-o" . ace-window)))
 
+(use-package multiple-cursors
+  :bind (("C-d"       . mc/mark-next-like-this)
+         ("C-S-d"     . mc/mark-previous-like-this)
+         ("C-c C-d"   . mc/mark-all-like-this)))
+
 (global-set-key (kbd "<f12>") #'xref-find-definitions)
 (global-set-key (kbd "S-<f12>") #'xref-find-references)
 (global-set-key (kbd "C-/") #'comment-line)
@@ -293,7 +298,6 @@
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
  ;; If there is more than one, they won't work right.
- '(custom-enabled-themes '(deeper-blue))
  '(ignored-local-variable-values '((version . ord1)))
  '(package-selected-packages
    '(ace-window blacken cape consult corfu flycheck lsp-pyright
