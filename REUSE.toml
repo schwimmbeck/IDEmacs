@@ -1,0 +1,17 @@
+version = 1
+
+[[annotations]]
+# License text at repository root:
+path = [
+    "LICENSE",
+]
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+# Documentation files without practical inline SPDX headers:
+path = [
+    "README.md",
+]
+SPDX-FileCopyrightText = "2026 ORDeC contributors"
+SPDX-License-Identifier = "Apache-2.0"

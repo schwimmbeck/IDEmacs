@@ -1,8 +1,5 @@
 ;;; init.el --- PyCharm-like Emacs setup -*- lexical-binding: t; -*-
 
-;; SPDX-FileCopyrightText: 2026 ORDeC contributors
-;; SPDX-License-Identifier: Apache-2.0
-
 ;; Author: Dominik Schwimmbeck <dominik.schwimmbeck@tu-berlin.de>
 
 ;;; Commentary:
