@@ -1,5 +1,8 @@
 ;;; init.el --- PyCharm-like Emacs setup -*- lexical-binding: t; -*-
 
+;; SPDX-FileCopyrightText: 2026 ORDeC contributors
+;; SPDX-License-Identifier: Apache-2.0
+
 ;; Author: Dominik Schwimmbeck <dominik.schwimmbeck@tu-berlin.de>
 
 ;;; Commentary:
@@ -13,8 +16,29 @@
 (require 'cl-lib)
 (require 'package)
 (require 'python)
+(require 'seq)
 (require 'subr-x)
 (require 'treesit nil t)
+
+(defconst my/idemacs-root
+  (when-let* ((init-file (or load-file-name user-init-file (buffer-file-name)))
+              (resolved-init-file (file-truename init-file)))
+    (directory-file-name (file-name-directory resolved-init-file)))
+  "Root directory of the IDEmacs checkout when loaded from source.")
+
+(defun my/first-existing-dir (&rest candidates)
+  "Return the first directory from CANDIDATES that exists."
+  (seq-find (lambda (dir) (and dir (file-directory-p dir))) candidates))
+
+(defun my/syntax-highlighting-ordec-root ()
+  "Return the local syntax_highlighting_ordec checkout when available.
+
+The lookup first honors `ORDEC_SYNTAX_HIGHLIGHTING_DIR'. If that is unset,
+fall back to a sibling checkout next to IDEmacs."
+  (my/first-existing-dir
+   (getenv "ORDEC_SYNTAX_HIGHLIGHTING_DIR")
+   (when my/idemacs-root
+     (expand-file-name "../syntax_highlighting_ordec" my/idemacs-root))))
 
 ;; Keep tabs literal by default.
 (setq-default indent-tabs-mode t)
@@ -141,12 +165,16 @@
   :demand t
   :config
   (projectile-mode 1)
-  (setq projectile-auto-discover t
+  (let ((default-search-root
+         (when my/idemacs-root
+           (expand-file-name ".." my/idemacs-root))))
+    (setq projectile-auto-discover t
         projectile-completion-system 'default
         projectile-enable-caching t
-        projectile-project-search-path '("~/Work/workspace/")
+        projectile-project-search-path
+        (seq-filter #'file-directory-p (list default-search-root))
         projectile-globally-ignored-directories
-        '(".idea" ".git" ".venv" "__pycache__" ".pytest_cache" "htmlcov" "node_modules" "dist" "build"))
+        '(".idea" ".git" ".venv" "__pycache__" ".pytest_cache" "htmlcov" "node_modules" "dist" "build")))
   (setq projectile-known-projects
         (seq-filter #'file-directory-p projectile-known-projects))
   :bind-keymap ("C-c p" . projectile-command-map))
@@ -288,7 +316,8 @@
 ;; ---------------------------------------------------------------------------
 ;; ORD support
 ;; ---------------------------------------------------------------------------
-(let ((ord-emacs-dir (expand-file-name "~/Work/workspace/syntax_highlighting_ordec/emacs/")))
+(let* ((ord-root (my/syntax-highlighting-ordec-root))
+       (ord-emacs-dir (and ord-root (expand-file-name "emacs" ord-root))))
   (when (file-directory-p ord-emacs-dir)
     (add-to-list 'load-path ord-emacs-dir)
     (require 'ord-mode nil t)))
