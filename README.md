@@ -1,7 +1,8 @@
 # IDEmacs
 
 Emacs configuration for a project-oriented IDE workflow, with first-class
-support for Python and local support for the ORD language used by ORDeC.
+support for Python and local support for the ORD language used by
+[ORDeC](https://github.com/tub-msc/ordec).
 
 This repository is intended to be usable by external users, but it currently
 assumes a local development workflow where custom ORD language support is
@@ -27,14 +28,14 @@ developed side-by-side in a separate repository:
 
 ## Repository Layout
 
-- [init.el](/home/dominik/Work/workspace/IDEmacs/init.el): main Emacs config
+- [init.el](./init.el): main Emacs config
 
 ## Setup
 
 ### 1. Clone The Repository
 
 ```bash
-git clone <your-remote-url> IDEmacs
+git clone git@github.com:schwimmbeck/IDEmacs.git
 cd IDEmacs
 ```
 
@@ -63,7 +64,8 @@ The first launch may install missing packages from GNU ELPA / MELPA Stable.
 ORD support is not built into Emacs. This config expects a sibling checkout of
 the language-support repository:
 
-- [syntax_highlighting_ordec](/home/dominik/Work/workspace/syntax_highlighting_ordec)
+- `syntax_highlighting_ordec`
+- [syntax_highlighting_ordec](https://github.com/schwimmbeck/syntax_highlighting_ordec)
 
 The current `init.el` looks for:
 
@@ -71,14 +73,16 @@ The current `init.el` looks for:
 - `tree-sitter-ord`
 - `vendor/tree-sitter-python`
 
-inside that repository.
+inside that repository. By default it checks for a sibling checkout next to
+`IDEmacs`. If your layout is different, set `ORDEC_SYNTAX_HIGHLIGHTING_DIR`
+before starting Emacs.
 
 ### Required Local Layout
 
 Example:
 
 ```text
-~/Work/workspace/
+/path/to/dev/
   IDEmacs/
   syntax_highlighting_ordec/
     emacs/
@@ -150,7 +154,7 @@ emacs --batch -Q -l /absolute/path/to/IDEmacs/init.el \
 
 - The config is optimized for local development, but ORD support now lives in a
   separate `ord-mode.el` file instead of being embedded in `init.el`.
-- The current setup still assumes local paths rather than a published Emacs
-  package.
+- The current setup expects either a sibling `syntax_highlighting_ordec`
+  checkout or an `ORDEC_SYNTAX_HIGHLIGHTING_DIR` override.
 - If you want a portable/public setup, the next step would be to publish the
   Emacs integration as its own package and let `init.el` only load it.
