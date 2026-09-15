@@ -12,6 +12,7 @@ SPDX-License-Identifier = "Apache-2.0"
 # Documentation files without practical inline SPDX headers:
 path = [
     "README.md",
+    "screenshots/ord-mode-diffpair.png",
 ]
 SPDX-FileCopyrightText = "2026 Dominik Schwimmbeck"
 SPDX-License-Identifier = "Apache-2.0"

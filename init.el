@@ -18,7 +18,6 @@
 (require 'python)
 (require 'seq)
 (require 'subr-x)
-(require 'treesit nil t)
 
 (defconst my/idemacs-root
   (when-let* ((init-file (or load-file-name user-init-file (buffer-file-name)))
@@ -30,15 +29,16 @@
   "Return the first directory from CANDIDATES that exists."
   (seq-find (lambda (dir) (and dir (file-directory-p dir))) candidates))
 
-(defun my/syntax-highlighting-ordec-root ()
-  "Return the local syntax_highlighting_ordec checkout when available.
+(defun my/ordec-root ()
+  "Return the local ORDeC checkout when available.
 
-The lookup first honors `ORDEC_SYNTAX_HIGHLIGHTING_DIR'. If that is unset,
-fall back to a sibling checkout next to IDEmacs."
+The lookup first honors `ORDEC_DIR'. If that is unset, fall back to a
+sibling checkout next to IDEmacs. Only used to locate the ordec-lsp
+executable when it is not on PATH."
   (my/first-existing-dir
-   (getenv "ORDEC_SYNTAX_HIGHLIGHTING_DIR")
+   (getenv "ORDEC_DIR")
    (when my/idemacs-root
-     (expand-file-name "../syntax_highlighting_ordec" my/idemacs-root))))
+     (expand-file-name "../ordec" my/idemacs-root))))
 
 ;; Keep tabs literal by default.
 (setq-default indent-tabs-mode t)
@@ -77,8 +77,11 @@ fall back to a sibling checkout next to IDEmacs."
       python-indent-guess-indent-offset nil)
 
 (menu-bar-mode 1)
-(tool-bar-mode -1)
-(scroll-bar-mode 1)
+;; Not defined in terminal-only Emacs builds.
+(when (fboundp 'tool-bar-mode)
+  (tool-bar-mode -1))
+(when (fboundp 'scroll-bar-mode)
+  (scroll-bar-mode 1))
 (global-display-line-numbers-mode 1)
 (column-number-mode 1)
 (show-paren-mode 1)
@@ -206,37 +209,15 @@ fall back to a sibling checkout next to IDEmacs."
   (lsp-enable-symbol-highlighting t)
   (lsp-headerline-breadcrumb-enable t)
   (lsp-idle-delay 0.2)
+  ;; ordec-lsp provides inferred-type inlay hints and semantic tokens.
+  (lsp-semantic-tokens-enable t)
+  (lsp-inlay-hint-enable t)
   (lsp-pylsp-plugins-pycodestyle-enabled nil)
   :hook ((python-mode . lsp-deferred)
          (ord-mode . lsp-deferred)))
 
 (use-package lsp-pyright
   :after lsp-mode
-  :config
-  (add-to-list 'lsp-language-id-configuration '(ord-mode . "python"))
-  (lsp-register-client
-   (make-lsp-client
-    :new-connection (lsp-stdio-connection
-                     (lambda ()
-                       (cons (lsp-package-path 'pyright)
-                             lsp-pyright-langserver-command-args)))
-    :major-modes '(ord-mode)
-    :server-id 'pyright-ord
-    :multi-root lsp-pyright-multi-root
-    :priority 2
-    :initialized-fn (lambda (workspace)
-                      (with-lsp-workspace workspace
-                        (lsp--set-configuration
-                         (make-hash-table :test 'equal))))
-    :download-server-fn (lambda (_client callback error-callback _update?)
-                          (lsp-package-ensure 'pyright callback error-callback))
-    :notification-handlers
-    (lsp-ht ((concat lsp-pyright-langserver-command "/beginProgress")
-             'lsp-pyright--begin-progress-callback)
-            ((concat lsp-pyright-langserver-command "/reportProgress")
-             'lsp-pyright--report-progress-callback)
-            ((concat lsp-pyright-langserver-command "/endProgress")
-             'lsp-pyright--end-progress-callback))))
   :custom
   (lsp-pyright-typechecking-mode "off")
   (lsp-pyright-diagnostic-mode "openFilesOnly")
@@ -244,14 +225,49 @@ fall back to a sibling checkout next to IDEmacs."
   (lsp-pyright-use-library-code-for-types t)
   (lsp-pyright-auto-search-paths t))
 
+;; ORD language intelligence comes from ORDeC's own stdio language server.
+;; It ships with the ordec Python package (pip install -e .); see
+;; docs/guides/editor_support.rst in the ORDeC repository.
+(defun my/ordec-lsp-command ()
+  "Return the ordec-lsp executable to launch.
+
+Prefer the current project's .venv, then the .venv of a local ORDeC
+checkout, then ordec-lsp on PATH."
+  (or (seq-find #'file-executable-p
+                (delq nil
+                      (list
+                       (expand-file-name ".venv/bin/ordec-lsp"
+                                         (my/project-root))
+                       (when-let* ((ordec-root (my/ordec-root)))
+                         (expand-file-name ".venv/bin/ordec-lsp"
+                                           ordec-root)))))
+      "ordec-lsp"))
+
+(with-eval-after-load 'lsp-mode
+  (add-to-list 'lsp-language-id-configuration '(ord-mode . "ord"))
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection
+                     (lambda () (list (my/ordec-lsp-command))))
+    :major-modes '(ord-mode)
+    :server-id 'ordec-lsp)))
+
 (use-package flycheck
   :init
   (global-flycheck-mode 1))
 
 (use-package blacken
-  :hook (python-mode . blacken-mode)
+  :hook (python-mode . my/maybe-blacken-mode)
   :custom
   (blacken-line-length 88))
+
+(defun my/maybe-blacken-mode ()
+  "Enable `blacken-mode', except in ORD buffers.
+
+`ord-mode' derives from `python-mode', so this runs there too, but
+black would reject valid ORD constructs."
+  (unless (derived-mode-p 'ord-mode)
+    (blacken-mode 1)))
 
 ;; ---------------------------------------------------------------------------
 ;; Python workflow
@@ -286,23 +302,28 @@ fall back to a sibling checkout next to IDEmacs."
                           python-package-dirs))))))
 
 (defun my/python-mode-setup ()
-  "Apply IDE-style defaults for Python buffers."
+  "Apply IDE-style defaults for Python buffers.
+
+`ord-mode' derives from `python-mode', so this hook runs in ORD
+buffers too. The editing defaults apply to both; the Pyright and
+Flycheck setup is Python-only, since ordec-lsp owns diagnostics in
+ORD buffers and the Python checkers would flag valid ORD constructs."
   (setq-local fill-column 88)
   (setq-local tab-width 4)
   (setq-local python-indent-offset 4)
-  ;; Keep LSP for completion and navigation, but avoid Pyright's noisy project
-  ;; diagnostics in dynamic codebases. Let Flycheck handle lightweight syntax
-  ;; validation instead.
-  (setq-local lsp-diagnostics-provider :none)
-  (setq-local lsp-disabled-clients
-              '(semgrep-ls ruff-lsp pylsp pyls))
-  (setq-local flycheck-checker 'python-pycompile)
-  (setq-local flycheck-disabled-checkers
-              '(python-pylint python-flake8 python-mypy))
-  (my/python-auto-venv))
+  (unless (derived-mode-p 'ord-mode)
+    ;; Keep LSP for completion and navigation, but avoid Pyright's noisy
+    ;; project diagnostics in dynamic codebases. Let Flycheck handle
+    ;; lightweight syntax validation instead.
+    (setq-local lsp-diagnostics-provider :none)
+    (setq-local lsp-disabled-clients
+                '(semgrep-ls ruff-lsp pylsp pyls))
+    (setq-local flycheck-checker 'python-pycompile)
+    (setq-local flycheck-disabled-checkers
+                '(python-pylint python-flake8 python-mypy))
+    (my/python-auto-venv)))
 
 (add-hook 'python-mode-hook #'my/python-mode-setup)
-(add-hook 'ord-mode-hook #'my/python-mode-setup)
 
 (defun my/run-project-tests ()
   "Run pytest for the current project."
@@ -316,11 +337,18 @@ fall back to a sibling checkout next to IDEmacs."
 ;; ---------------------------------------------------------------------------
 ;; ORD support
 ;; ---------------------------------------------------------------------------
-(let* ((ord-root (my/syntax-highlighting-ordec-root))
-       (ord-emacs-dir (and ord-root (expand-file-name "emacs" ord-root))))
-  (when (file-directory-p ord-emacs-dir)
-    (add-to-list 'load-path ord-emacs-dir)
-    (require 'ord-mode nil t)))
+;; ord-mode lives in this repository (lisp/ord-mode.el), since ORDeC's
+;; editor support (support/editors/) carries no Emacs package. It layers
+;; the ORD constructs on top of python-mode; ordec-lsp (registered above)
+;; adds the semantic features.
+(when my/idemacs-root
+  (let ((lisp-dir (expand-file-name "lisp" my/idemacs-root)))
+    (when (file-directory-p lisp-dir)
+      (add-to-list 'load-path lisp-dir))))
+(unless (require 'ord-mode nil t)
+  (display-warning
+   'idemacs
+   "ord-mode not found; expected lisp/ord-mode.el next to init.el (or on `load-path') — .ord support is disabled"))
 
 (custom-set-variables
  ;; custom-set-variables was added by Custom.
