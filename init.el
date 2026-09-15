@@ -125,6 +125,11 @@
 (use-package ace-window
   :bind (("M-o" . ace-window)))
 
+(use-package multiple-cursors
+  :bind (("C-d"       . mc/mark-next-like-this)
+         ("C-S-d"     . mc/mark-previous-like-this)
+         ("C-c C-d"   . mc/mark-all-like-this)))
+
 (global-set-key (kbd "<f12>") #'xref-find-definitions)
 (global-set-key (kbd "S-<f12>") #'xref-find-references)
 (global-set-key (kbd "C-/") #'comment-line)
