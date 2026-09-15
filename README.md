@@ -23,7 +23,7 @@ developed side-by-side in a separate repository:
 - Python editing: built-in Python mode / `python-ts-mode`, `lsp-mode`,
   `lsp-pyright`, `flycheck`, `blacken`
 - Theme: `modus-vivendi`
-- ORD editing: local `ord-mode` built on tree-sitter
+- ORD editing: local `ord-mode` package with optional tree-sitter support
 
 ## Repository Layout
 
@@ -67,6 +67,7 @@ the language-support repository:
 
 The current `init.el` looks for:
 
+- `emacs/ord-mode.el`
 - `tree-sitter-ord`
 - `vendor/tree-sitter-python`
 
@@ -80,6 +81,8 @@ Example:
 ~/Work/workspace/
   IDEmacs/
   syntax_highlighting_ordec/
+    emacs/
+      ord-mode.el
     tree-sitter-ord/
     vendor/
       tree-sitter-python/
@@ -107,17 +110,24 @@ cc -shared -o libtree-sitter-python.so parser.o scanner.o
 
 After that, restart Emacs or reload the init file.
 
+If those grammars are not built yet, the setup still starts cleanly. In that
+case `.ord` files open in `ord-mode` with Python editing behavior plus a small
+regex-based ORD keyword layer, but without tree-sitter-driven highlighting.
+
 ## How The ORD Integration Works
 
 The current setup uses:
 
-- `python-ts-mode` as the base mode for Python-like behavior
+- `ord-mode` from `syntax_highlighting_ordec/emacs/ord-mode.el`
+- `python-mode` as the always-available base mode
 - the local Python tree-sitter grammar for Python highlighting
 - the local ORD tree-sitter grammar for ORD-specific syntax
 - Emacs-specific queries from `syntax_highlighting_ordec/tree-sitter-ord`
 
 This approach keeps Python highlighting and editor behavior close to the
-built-in Emacs experience while layering ORD-specific syntax on top.
+built-in Emacs experience while layering ORD-specific syntax on top. When the
+grammars are missing, the package falls back to plain Python-based editing
+instead of failing during startup.
 
 ## Validation
 
@@ -138,8 +148,9 @@ emacs --batch -Q -l /absolute/path/to/IDEmacs/init.el \
 
 ## Notes For External Users
 
-- The config is optimized for local development, not for MELPA packaging.
-- The ORD integration currently assumes local paths rather than a published
-  Emacs package.
-- If you want a portable/public setup, the next step would be to package the
-  ORD Emacs support as its own minor project and keep `init.el` thinner.
+- The config is optimized for local development, but ORD support now lives in a
+  separate `ord-mode.el` file instead of being embedded in `init.el`.
+- The current setup still assumes local paths rather than a published Emacs
+  package.
+- If you want a portable/public setup, the next step would be to publish the
+  Emacs integration as its own package and let `init.el` only load it.

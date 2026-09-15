@@ -1,5 +1,7 @@
 ;;; init.el --- PyCharm-like Emacs setup -*- lexical-binding: t; -*-
 
+;; Author: Dominik Schwimmbeck <dominik.schwimmbeck@tu-berlin.de>
+
 ;;; Commentary:
 ;; Emacs configuration tuned for an IDE workflow:
 ;; - project-centric editing
@@ -13,27 +15,6 @@
 (require 'python)
 (require 'subr-x)
 (require 'treesit nil t)
-
-(defcustom my/python-treesit-dir
-  (let ((default-dir (expand-file-name "~/Work/workspace/syntax_highlighting_ordec/vendor/tree-sitter-python/")))
-    (when (file-directory-p default-dir)
-      default-dir))
-  "Optional path to a local tree-sitter Python grammar directory."
-  :type '(choice (const :tag "Disabled" nil) directory)
-  :group 'tools)
-
-(defcustom my/ord-treesit-dir
-  (let ((default-dir (expand-file-name "~/Work/workspace/syntax_highlighting_ordec/tree-sitter-ord/")))
-    (when (file-directory-p default-dir)
-      default-dir))
-  "Optional path to a tree-sitter grammar directory for `.ord' files."
-  :type '(choice (const :tag "Disabled" nil) directory)
-  :group 'tools)
-
-(defun my/ord-emacs-highlights-file ()
-  "Return the Emacs-specific highlight query file for the optional ORD grammar."
-  (when my/ord-treesit-dir
-    (expand-file-name "queries/highlights-emacs.scm" my/ord-treesit-dir)))
 
 ;; Keep tabs literal by default.
 (setq-default indent-tabs-mode t)
@@ -193,10 +174,36 @@
   (lsp-headerline-breadcrumb-enable t)
   (lsp-idle-delay 0.2)
   (lsp-pylsp-plugins-pycodestyle-enabled nil)
-  :hook ((python-mode . lsp-deferred)))
+  :hook ((python-mode . lsp-deferred)
+         (ord-mode . lsp-deferred)))
 
 (use-package lsp-pyright
   :after lsp-mode
+  :config
+  (add-to-list 'lsp-language-id-configuration '(ord-mode . "python"))
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection
+                     (lambda ()
+                       (cons (lsp-package-path 'pyright)
+                             lsp-pyright-langserver-command-args)))
+    :major-modes '(ord-mode)
+    :server-id 'pyright-ord
+    :multi-root lsp-pyright-multi-root
+    :priority 2
+    :initialized-fn (lambda (workspace)
+                      (with-lsp-workspace workspace
+                        (lsp--set-configuration
+                         (make-hash-table :test 'equal))))
+    :download-server-fn (lambda (_client callback error-callback _update?)
+                          (lsp-package-ensure 'pyright callback error-callback))
+    :notification-handlers
+    (lsp-ht ((concat lsp-pyright-langserver-command "/beginProgress")
+             'lsp-pyright--begin-progress-callback)
+            ((concat lsp-pyright-langserver-command "/reportProgress")
+             'lsp-pyright--report-progress-callback)
+            ((concat lsp-pyright-langserver-command "/endProgress")
+             'lsp-pyright--end-progress-callback))))
   :custom
   (lsp-pyright-typechecking-mode "off")
   (lsp-pyright-diagnostic-mode "openFilesOnly")
@@ -254,12 +261,15 @@
   ;; diagnostics in dynamic codebases. Let Flycheck handle lightweight syntax
   ;; validation instead.
   (setq-local lsp-diagnostics-provider :none)
+  (setq-local lsp-disabled-clients
+              '(semgrep-ls ruff-lsp pylsp pyls))
   (setq-local flycheck-checker 'python-pycompile)
   (setq-local flycheck-disabled-checkers
               '(python-pylint python-flake8 python-mypy))
   (my/python-auto-venv))
 
 (add-hook 'python-mode-hook #'my/python-mode-setup)
+(add-hook 'ord-mode-hook #'my/python-mode-setup)
 
 (defun my/run-project-tests ()
   "Run pytest for the current project."
@@ -273,78 +283,28 @@
 ;; ---------------------------------------------------------------------------
 ;; ORD support
 ;; ---------------------------------------------------------------------------
-(defvar ord--treesit-font-lock-settings nil
-  "Compiled tree-sitter font-lock settings for `ord-mode'.")
-
-(defconst my/ord-extra-font-lock-keywords
-  '(("^\\s-*\\(cell\\)\\s-+\\([[:alpha:]_][[:alnum:]_]*\\)"
-     (1 font-lock-keyword-face)
-     (2 font-lock-type-face))
-    ("^\\s-*\\(viewgen\\)\\s-+\\([[:alpha:]_][[:alnum:]_]*\\)\\(?:.*?->\\s-*\\([[:alpha:]_][[:alnum:]_]*\\)\\)?"
-     (1 font-lock-keyword-face)
-     (2 font-lock-function-name-face)
-     (3 font-lock-type-face nil t))
-    ("^\\s-*\\(path\\|net\\)\\b" 1 font-lock-keyword-face)
-    ("^\\s-*\\(inout\\|input\\|output\\|port\\)\\b" 1 font-lock-keyword-face))
-  "Small regex supplement for ORD declaration keywords on top of Python tree-sitter highlighting.")
-
-(defconst my/ord-python-treesit-feature-list
-  '((comment definition)
-    (keyword string type)
-    (assignment builtin constant decorator
-                escape-sequence number string-interpolation)
-    (bracket delimiter function operator variable property)
-    (ord))
-  "Python tree-sitter features plus the ORD-specific feature group.")
-
-(when (boundp 'treesit-extra-load-path)
-  (dolist (dir (list my/python-treesit-dir my/ord-treesit-dir))
-    (when dir
-      (add-to-list 'treesit-extra-load-path dir))))
-
-(when (and (my/ord-emacs-highlights-file)
-           (file-exists-p (my/ord-emacs-highlights-file))
-           (fboundp 'treesit-font-lock-rules))
-  (setq ord--treesit-font-lock-settings
-        (append
-         python--treesit-settings
-         (treesit-font-lock-rules
-          :language 'ord
-          :feature 'ord
-          (with-temp-buffer
-            (insert-file-contents (my/ord-emacs-highlights-file))
-            (buffer-string))))))
-
-(define-derived-mode ord-mode python-ts-mode "Ord"
-  "Major mode for editing `.ord' files."
-  (setq-local comment-start "# ")
-  (setq-local comment-end "")
-  (setq-local tab-width 4)
-  (setq-local indent-tabs-mode t)
-  (font-lock-add-keywords nil my/ord-extra-font-lock-keywords 'prepend)
-  (when (and (fboundp 'treesit-language-available-p)
-             (treesit-language-available-p 'python)
-             (treesit-language-available-p 'ord)
-             ord--treesit-font-lock-settings)
-    (treesit-parser-create 'python)
-    (treesit-parser-create 'ord)
-    (setq-local treesit-font-lock-settings ord--treesit-font-lock-settings)
-    (setq-local treesit-font-lock-feature-list my/ord-python-treesit-feature-list)
-    (treesit-major-mode-setup)))
-
-(add-to-list 'auto-mode-alist '("\\.ord\\'" . ord-mode))
+(let ((ord-emacs-dir (expand-file-name "~/Work/workspace/syntax_highlighting_ordec/emacs/")))
+  (when (file-directory-p ord-emacs-dir)
+    (add-to-list 'load-path ord-emacs-dir)
+    (require 'ord-mode nil t)))
 
 (custom-set-variables
  ;; custom-set-variables was added by Custom.
  ;; If you edit it by hand, you could mess it up, so be careful.
  ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ '(ignored-local-variable-values '((version . ord1)))
  '(package-selected-packages
-   '(ace-window blacken cape consult corfu flycheck lsp-pyright marginalia
-                multiple-cursors orderless treemacs-projectile vertico))
+   '(ace-window blacken cape consult corfu flycheck lsp-pyright
+				marginalia multiple-cursors orderless
+				treemacs-projectile vertico))
  '(safe-local-variable-values '((version . ord2) (version . ord))))
 
 (custom-set-faces
  ;; custom-set-faces was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
  )
 
 (provide 'init)
